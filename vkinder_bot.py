@@ -42,7 +42,7 @@ def get_user_info(user_id: int) -> dict:
         print(error)
 
 
-def get_age(user_id, user_info):
+def get_age(user_id: int, user_info: dict) -> int:
     if 'bdate' not in user_info:
         write_msg(user_id, 'Введите Ваш возраст')
         age = get_message(user_id)
@@ -65,7 +65,7 @@ def get_age(user_id, user_info):
     return age
 
 
-def get_city(user_id, user_info):
+def get_city(user_id: int, user_info: dict) -> dict:
     if 'city' not in user_info:
         write_msg(user_id, 'Введите Ваш город\nМожно по английски')
         city = get_message(user_id)
@@ -81,7 +81,7 @@ def get_city(user_id, user_info):
     return user_info['city']
 
 
-def send_photos(user_id, person_id, photos_data):
+def send_photos(user_id: int, person_id: int, photos_data: list):
     person_info = get_user_info(person_id)
     send_person_info = f"{person_info['first_name']} {person_info['last_name']}\nhttps://vk.com/{person_info['domain']}"
     write_msg(user_id, send_person_info)
@@ -89,7 +89,7 @@ def send_photos(user_id, person_id, photos_data):
         write_msg(user_id, f'Фото {_ + 1}', photos_data[_])
 
 
-def main(user_id):
+def main(user_id: int):
     create_tables()
     info = get_user_info(user_id)
     age = get_age(user_id, info)
