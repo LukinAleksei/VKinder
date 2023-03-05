@@ -1,28 +1,30 @@
 # -*- coding: utf-8 -*-
+import os
 from random import randrange
 import datetime as dt
 from pprint import pprint
+from dotenv import load_dotenv
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-from VKinder_bd import *
+from vkinder_bd import create_tables, download_user_data, check_person_data, download_person_data
+from vkinder_models_user import check_city, get_person_id, get_photos
 
 
-def get_vk_bot_token():
-    with open('client_secret.txt', 'r') as token_file:
-        return token_file.readline().strip()
+load_dotenv()
 
-
-def get_vk_user_token():
-    with open('user_tokenVK.txt', 'r') as token_file:
-        return token_file.readline().strip()
-
-
-vk_bot = vk_api.VkApi(token=get_vk_bot_token())
-vk_user = vk_api.VkApi(token=get_vk_user_token())
+vk_bot_token = os.getenv('VK_BOT')
+vk_bot = vk_api.VkApi(token=vk_bot_token)
 longpoll = VkBotLongPoll(vk_bot, '218792365')
 
 
-def write_msg(user_id, message, attachment=' '):
+def get_message(user_id: int) -> str:
+    for event in longpoll.listen():
+        if event.type == VkBotEventType.MESSAGE_NEW:
+            if event.obj['message']['from_id'] == user_id:
+                return event.obj['message']['text']
+
+
+def write_msg(user_id: int, message: str, attachment=' '):
     try:
         vk_bot.method('messages.send', {'user_id': user_id,
                                         'message': message,
@@ -32,16 +34,12 @@ def write_msg(user_id, message, attachment=' '):
         print(err)
 
 
-def get_user_info(user_id):
-    resp = vk_bot.method('users.get', {'user_id': user_id, 'v': 5.131, 'fields': 'bdate, city, sex, domain'})
-    return resp[0]
-
-
-def get_message(user_id):
-    for event in longpoll.listen():
-        if event.type == VkBotEventType.MESSAGE_NEW:
-            if event.obj['message']['from_id'] == user_id:
-                return event.obj['message']['text']
+def get_user_info(user_id: int) -> dict:
+    try:
+        resp = vk_bot.method('users.get', {'user_id': user_id, 'v': 5.131, 'fields': 'bdate, city, sex, domain'})
+        return resp[0]
+    except vk_api.exceptions.ApiError as error:
+        print(error)
 
 
 def get_age(user_id, user_info):
@@ -83,56 +81,6 @@ def get_city(user_id, user_info):
     return user_info['city']
 
 
-def check_city(city):
-    fields = {
-        'country_id': 1,
-        'q': city,
-        'count': 1
-    }
-    response = vk_user.method('database.getCities', values=fields)
-    return response['items']
-
-
-def get_person_id(user_info, city, age):
-    fields = {
-        'count': 1000,
-        'v': 5.131,
-        'city': city,
-        'sex': 3 - user_info['sex'],
-        'status': 6,
-        'age_from': age - 2,
-        'age_to': age + 10,
-        'has_photo': 1
-    }
-    response = vk_user.method('users.search', values=fields)
-    open_page_persons_id = []
-    for person in response.get('items'):
-        if not person['is_closed']:
-            open_page_persons_id.append(person['id'])
-    for person_id in open_page_persons_id:
-        yield person_id
-
-
-def get_photos(person_id):
-    params = {
-        'owner_id': person_id,
-        'album_id': 'profile',
-        'extended': 1,
-        'v': 5.131
-    }
-    response = vk_user.method('photos.get', values=params)
-    if response['count'] < 3:
-        return False
-    else:
-        best_photos = sorted(response['items'],
-                             key=lambda x: x['likes']['count'] + x['comments']['count'], reverse=True)[:3]
-        photos_data = []
-        for p in best_photos:
-            photo_data = f"photo{p['owner_id']}_{p['id']}"
-            photos_data.append(photo_data)
-        return photos_data
-
-
 def send_photos(user_id, person_id, photos_data):
     person_info = get_user_info(person_id)
     send_person_info = f"{person_info['first_name']} {person_info['last_name']}\nhttps://vk.com/{person_info['domain']}"
@@ -148,23 +96,19 @@ def main(user_id):
     if age < 18:
         return write_msg(user_id, 'Минимальный возраст 18 лет')
     city = get_city(user_id, info)
-    download_user_data(user_id, info['first_name'], info['last_name'], age, city['title'])
+    download_user_data(user_id)
     while True:
-        try:
-            for person_id in get_person_id(info, city['id'], age):
-                if not check_person_data(user_id, person_id):
-                    pprint(get_user_info(person_id))
-                    photos_data = get_photos(person_id)
-                    if photos_data:
-                        send_photos(user_id, person_id, photos_data)
-                        download_person_data(user_id, person_id, get_user_info(person_id)['first_name'],
-                                             get_user_info(person_id)['last_name'])
-                        write_msg(user_id, 'Искать еще?\nЕсли устали, напишите "нет" или "no"')
-                        continue_ = get_message(user_id).lower()
-                        if continue_ == 'нет' or continue_ == 'no' or continue_ == 'n' or continue_ == 'н':
-                            return write_msg(user_id, 'До свидания')
-        except StopIteration:
-            continue
+        for person_id in get_person_id(info, city['id'], age):
+            if not check_person_data(user_id, person_id):
+                pprint(get_user_info(person_id))
+                photos_data = get_photos(person_id)
+                if photos_data:
+                    send_photos(user_id, person_id, photos_data)
+                    download_person_data(user_id, person_id)
+                    write_msg(user_id, 'Искать еще?\nЕсли устали, напишите "нет" или "no"')
+                    continue_ = get_message(user_id).lower()
+                    if continue_ == 'нет' or continue_ == 'no' or continue_ == 'n' or continue_ == 'н':
+                        return write_msg(user_id, 'До свидания')
 
 
 while True:
